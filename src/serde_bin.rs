@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 use std::convert::TryInto;
+use std::hash::Hash;
 
 /// A trait for objects that can be serialized to binary.
 pub trait SerBin {
@@ -95,7 +95,7 @@ macro_rules! impl_ser_de_bin_for {
                     });
                 }
                 let mut m = [0 as $ty];
-                m[0] = <$ty>::from_ne_bytes(d[*o..(*o+l)].try_into().unwrap());
+                m[0] = <$ty>::from_ne_bytes(d[*o..(*o + l)].try_into().unwrap());
                 *o += l;
                 Ok(m[0])
             }
@@ -289,9 +289,12 @@ where
     }
 }
 
-impl<T, const N: usize> DeBin for [T; N] where T: DeBin {
-    fn de_bin(o:&mut usize, d:&[u8]) -> Result<Self, DeBinErr> {
-        unsafe{
+impl<T, const N: usize> DeBin for [T; N]
+where
+    T: DeBin,
+{
+    fn de_bin(o: &mut usize, d: &[u8]) -> Result<Self, DeBinErr> {
+        unsafe {
             let mut to = std::mem::MaybeUninit::<[T; N]>::uninit();
             let top: *mut T = std::mem::transmute(&mut to);
             for c in 0..N {

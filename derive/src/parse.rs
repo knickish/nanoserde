@@ -6,7 +6,7 @@
 
 use proc_macro::{Delimiter, Group, TokenStream, TokenTree};
 
-use std::iter::Peekable;
+use std::{iter::Peekable, collections::HashSet};
 
 #[derive(Debug)]
 pub struct Attribute {
@@ -32,9 +32,10 @@ pub struct Field {
 }
 
 #[allow(dead_code)]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Type {
     pub is_option: bool,
+    pub is_generic: bool,
     pub path: String,
 }
 
@@ -183,17 +184,18 @@ pub fn debug_current_token(source: &mut Peekable<impl Iterator<Item = TokenTree>
     println!("{:?}", source.peek());
 }
 
-fn next_type<T: Iterator<Item = TokenTree>>(mut source: &mut Peekable<T>) -> Option<Type> {
+fn next_type<T: Iterator<Item = TokenTree>>(mut source: &mut Peekable<T>, generic_typenames: &HashSet<String> ) -> Option<Type> {
     let group = next_group(&mut source);
     if group.is_some() {
         let mut group = group.unwrap().stream().into_iter().peekable();
 
         let mut tuple_type = Type {
             is_option: false,
+            is_generic: false,
             path: "".to_string(),
         };
 
-        while let Some(next_ty) = next_type(&mut group) {
+        while let Some(next_ty) = next_type(&mut group, generic_typenames) {
             tuple_type.path.push_str(&format!("{}, ", next_ty.path));
         }
 
@@ -211,9 +213,9 @@ fn next_type<T: Iterator<Item = TokenTree>>(mut source: &mut Peekable<T>) -> Opt
 
     let angel_bracket = next_exact_punct(&mut source, "<");
     if angel_bracket.is_some() {
-        let mut generic_type = next_type(source).expect("Expecting generic argument");
+        let mut generic_type = next_type(source, generic_typenames).expect("Expecting generic argument");
         while let Some(_comma) = next_exact_punct(&mut source, ",") {
-            let next_ty = next_type(source).expect("Expecting generic argument");
+            let next_ty = next_type(source, generic_typenames).expect("Expecting generic argument");
             generic_type.path.push_str(&format!(", {}", next_ty.path));
         }
 
@@ -222,19 +224,23 @@ fn next_type<T: Iterator<Item = TokenTree>>(mut source: &mut Peekable<T>) -> Opt
 
         if ty == "Option" {
             Some(Type {
-                path: generic_type.path,
+                path: generic_type.path.clone(),
                 is_option: true,
+                is_generic: generic_typenames.get(&generic_type.path).is_some()
             })
         } else {
             Some(Type {
                 path: format!("{}<{}>", ty, generic_type.path),
                 is_option: false,
+                is_generic: generic_typenames.get(&generic_type.path).is_some()
             })
         }
     } else {
+        // panic!("{} \n{:?}", &ty, generic_typenames);
         Some(Type {
-            path: ty,
+            path: ty.clone(),
             is_option: false,
+            is_generic: generic_typenames.get(&ty).is_some()
         })
     }
 }
@@ -308,6 +314,7 @@ fn next_attributes_list(source: &mut Peekable<impl Iterator<Item = TokenTree>>) 
 fn next_fields(
     mut body: &mut Peekable<impl Iterator<Item = TokenTree>>,
     named: bool,
+    generic_typenames: &HashSet<String>
 ) -> Vec<Field> {
     let mut fields = vec![];
 
@@ -327,7 +334,7 @@ fn next_fields(
             None
         };
 
-        let ty = next_type(&mut body).expect("Expected field type");
+        let ty = next_type(&mut body, &generic_typenames).expect("Expected field type");
         let _punct = next_punct(&mut body);
 
         fields.push(Field {
@@ -342,7 +349,7 @@ fn next_fields(
 
 fn next_struct(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> Struct {
     let struct_name = next_ident(&mut source).expect("Unnamed structs are not supported");
-
+    let generic_types = get_bounds(source);
     let group = next_group(&mut source);
     // unit struct
     if group.is_none() {
@@ -356,6 +363,7 @@ fn next_struct(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> St
             named: false,
         };
     };
+    
     let group = group.unwrap();
     let delimiter = group.delimiter();
     let named = match delimiter {
@@ -366,7 +374,7 @@ fn next_struct(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> St
     };
 
     let mut body = group.stream().into_iter().peekable();
-    let fields = next_fields(&mut body, named);
+    let fields = next_fields(&mut body, named, &generic_types);
 
     if named == false {
         next_exact_punct(&mut source, ";").expect("Expected ; on the end of tuple struct");
@@ -382,7 +390,7 @@ fn next_struct(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> St
 
 fn next_enum(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> Enum {
     let enum_name = next_ident(&mut source).expect("Unnamed enums are not supported");
-
+    let generic_types = get_bounds(source);
     let group = next_group(&mut source);
     // unit enum
     if group.is_none() {
@@ -425,7 +433,7 @@ fn next_enum(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> Enum
         };
         {
             let mut body = group.stream().into_iter().peekable();
-            let fields = next_fields(&mut body, named);
+            let fields = next_fields(&mut body, named, &generic_types);
             variants.push(EnumVariant {
                 name: variant_name,
                 named,
@@ -442,6 +450,99 @@ fn next_enum(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> Enum
         variants,
         attributes: vec![],
     }
+}
+
+fn get_bounds(source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> HashSet<String> {
+    let mut ret = HashSet::new();
+    let mut tmp: Vec<String> = Vec::new();
+
+    match source.peek() {
+        Some(content) if content.to_string() == "<" => {
+            source.next();
+            let mut typename = "".to_string(); 
+            let mut in_type = true;
+            while let Some(tok) = source.next() {
+                tmp.push(tok.to_string());
+                match tok.to_string().as_str() {
+                    ">" => {
+                        if !typename.is_empty(){
+                            ret.insert(typename.clone());
+                        }
+                        break
+                    },
+                    ":" => {
+                        ret.insert(typename.clone());
+                        typename.clear();
+                        in_type = false
+                    },
+                    "," => {
+                        if in_type {
+                            ret.insert(typename.clone());
+                            typename.clear();
+                        }
+                        in_type = true
+                    },
+                    c => {
+                        if in_type {
+                            typename+=c
+                        } 
+                    }
+                }
+            }
+        },
+        _ => ()
+    }
+    ret
+}
+
+pub(crate) fn struct_bounds_strings(struct_: &Struct, bound_name: &str) -> (String, String) {
+    let mut generics: Vec<Type> = Vec::new();
+    for field in struct_.fields.iter() {
+        if field.ty.is_generic {
+            generics.push(field.ty.clone())
+        }
+    }
+    if generics.is_empty() {
+        return ("".to_string(), "".to_string());
+    }
+    let mut generic_w_bounds = "<".to_string();
+    for generic in generics.iter() {
+        generic_w_bounds += &format!("{}: nanoserde::{}, ", generic.path, bound_name);
+    }
+    generic_w_bounds += ">";
+
+    let mut generic_no_bounds = "<".to_string();
+    for generic in generics.iter() {
+        generic_no_bounds += &format!("{}, ", generic.path);
+    }
+    generic_no_bounds += ">";
+    return (generic_w_bounds, generic_no_bounds);
+}
+
+pub(crate) fn enum_bounds_strings(enum_: &Enum, bound_name: &str) -> (String, String) {
+    let mut generics: Vec<Type> = Vec::new();
+    for variant in enum_.variants.iter() {
+        for field in variant.fields.iter() {
+            if field.ty.is_generic {
+                generics.push(field.ty.clone())
+            }
+        }
+    }
+    if generics.is_empty() {
+        return ("".to_string(), "".to_string());
+    }
+    let mut generic_w_bounds = "<".to_string();
+    for generic in generics.iter() {
+        generic_w_bounds += &format!("{}: nanoserde::{}, ", generic.path, bound_name);
+    }
+    generic_w_bounds += ">";
+
+    let mut generic_no_bounds = "<".to_string();
+    for generic in generics.iter() {
+        generic_no_bounds += &format!("{}, ", generic.path);
+    }
+    generic_no_bounds += ">";
+    return (generic_w_bounds, generic_no_bounds);
 }
 
 pub fn parse_data(input: TokenStream) -> Data {
@@ -463,8 +564,8 @@ pub fn parse_data(input: TokenStream) -> Data {
         "struct" => {
             let mut struct_ = next_struct(&mut source);
             struct_.attributes = attributes;
-
             res = Data::Struct(struct_);
+            
         }
         "enum" => {
             let enum_ = next_enum(&mut source);
@@ -478,6 +579,5 @@ pub fn parse_data(input: TokenStream) -> Data {
         source.next().is_none(),
         "Unexpected data after end of the struct"
     );
-
     res
 }

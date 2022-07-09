@@ -861,9 +861,12 @@ where
     }
 }
 
-impl<T, const N: usize> DeJson for [T; N] where T: DeJson {
-    fn de_json(o:&mut DeJsonState, d:&mut Chars) -> Result<Self, DeJsonErr> {
-        unsafe{
+impl<T, const N: usize> DeJson for [T; N]
+where
+    T: DeJson,
+{
+    fn de_json(o: &mut DeJsonState, d: &mut Chars) -> Result<Self, DeJsonErr> {
+        unsafe {
             let mut to = std::mem::MaybeUninit::<[T; N]>::uninit();
             let top: *mut T = std::mem::transmute(&mut to);
             de_json_array_impl_inner(top, N, o, d)?;

@@ -903,7 +903,10 @@ where
     Ok(())
 }
 
-impl<T, const N: usize> DeRon for [T; N] where T: DeRon {
+impl<T, const N: usize> DeRon for [T; N]
+where
+    T: DeRon,
+{
     fn de_ron(s: &mut DeRonState, i: &mut Chars) -> Result<Self, DeRonErr> {
         unsafe {
             let mut to = std::mem::MaybeUninit::<[T; N]>::uninit();
