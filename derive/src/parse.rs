@@ -35,7 +35,6 @@ pub struct Field {
 #[derive(Debug, Clone)]
 pub struct Type {
     pub is_option: bool,
-    pub is_generic: bool,
     pub path: String,
 }
 
@@ -45,6 +44,7 @@ pub struct Struct {
     pub named: bool,
     pub fields: Vec<Field>,
     pub attributes: Vec<Attribute>,
+    pub generics: Vec<String>
 }
 
 #[derive(Debug)]
@@ -60,6 +60,7 @@ pub struct Enum {
     pub name: String,
     pub variants: Vec<EnumVariant>,
     pub attributes: Vec<Attribute>,
+    pub generics: Vec<String>
 }
 
 #[allow(dead_code)]
@@ -191,7 +192,6 @@ fn next_type<T: Iterator<Item = TokenTree>>(mut source: &mut Peekable<T>, generi
 
         let mut tuple_type = Type {
             is_option: false,
-            is_generic: false,
             path: "".to_string(),
         };
 
@@ -226,13 +226,11 @@ fn next_type<T: Iterator<Item = TokenTree>>(mut source: &mut Peekable<T>, generi
             Some(Type {
                 path: generic_type.path.clone(),
                 is_option: true,
-                is_generic: generic_typenames.get(&generic_type.path).is_some()
             })
         } else {
             Some(Type {
                 path: format!("{}<{}>", ty, generic_type.path),
                 is_option: false,
-                is_generic: generic_typenames.get(&generic_type.path).is_some()
             })
         }
     } else {
@@ -240,7 +238,6 @@ fn next_type<T: Iterator<Item = TokenTree>>(mut source: &mut Peekable<T>, generi
         Some(Type {
             path: ty.clone(),
             is_option: false,
-            is_generic: generic_typenames.get(&ty).is_some()
         })
     }
 }
@@ -361,6 +358,7 @@ fn next_struct(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> St
             fields: vec![],
             attributes: vec![],
             named: false,
+            generics: vec![]
         };
     };
     
@@ -385,6 +383,7 @@ fn next_struct(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> St
         named,
         fields,
         attributes: vec![],
+        generics: generic_types.into_iter().collect()
     }
 }
 
@@ -398,6 +397,7 @@ fn next_enum(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> Enum
             name: enum_name,
             variants: vec![],
             attributes: vec![],
+            generics: vec![]
         };
     };
     let group = group.unwrap();
@@ -449,6 +449,7 @@ fn next_enum(mut source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> Enum
         name: enum_name,
         variants,
         attributes: vec![],
+        generics: generic_types.into_iter().collect()
     }
 }
 
@@ -496,50 +497,39 @@ fn get_bounds(source: &mut Peekable<impl Iterator<Item = TokenTree>>) -> HashSet
 }
 
 pub(crate) fn struct_bounds_strings(struct_: &Struct, bound_name: &str) -> (String, String) {
-    let mut generics: Vec<Type> = Vec::new();
-    for field in struct_.fields.iter() {
-        if field.ty.is_generic {
-            generics.push(field.ty.clone())
-        }
-    }
+    let generics: &Vec<String> = &struct_.generics;
     if generics.is_empty() {
         return ("".to_string(), "".to_string());
     }
     let mut generic_w_bounds = "<".to_string();
     for generic in generics.iter() {
-        generic_w_bounds += &format!("{}: nanoserde::{}, ", generic.path, bound_name);
+        generic_w_bounds += &format!("{}: nanoserde::{}, ", generic, bound_name);
     }
     generic_w_bounds += ">";
 
     let mut generic_no_bounds = "<".to_string();
     for generic in generics.iter() {
-        generic_no_bounds += &format!("{}, ", generic.path);
+        generic_no_bounds += &format!("{}, ", generic);
     }
     generic_no_bounds += ">";
     return (generic_w_bounds, generic_no_bounds);
 }
 
 pub(crate) fn enum_bounds_strings(enum_: &Enum, bound_name: &str) -> (String, String) {
-    let mut generics: Vec<Type> = Vec::new();
-    for variant in enum_.variants.iter() {
-        for field in variant.fields.iter() {
-            if field.ty.is_generic {
-                generics.push(field.ty.clone())
-            }
-        }
-    }
+    let generics: &Vec<String> = &enum_.generics;
+
     if generics.is_empty() {
         return ("".to_string(), "".to_string());
     }
     let mut generic_w_bounds = "<".to_string();
     for generic in generics.iter() {
-        generic_w_bounds += &format!("{}: nanoserde::{}, ", generic.path, bound_name);
+        generic_w_bounds += &format!("{}: nanoserde::{}, ", generic, bound_name);
     }
     generic_w_bounds += ">";
 
     let mut generic_no_bounds = "<".to_string();
     for generic in generics.iter() {
-        generic_no_bounds += &format!("{}, ", generic.path);
+        generic_no_bounds += &format!("{}, ", generic);
     }
     generic_no_bounds += ">";
     return (generic_w_bounds, generic_no_bounds);
