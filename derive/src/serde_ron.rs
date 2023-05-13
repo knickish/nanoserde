@@ -287,12 +287,12 @@ pub fn derive_ser_ron_enum(enum_: &Enum) -> TokenStream {
     let mut body = String::new();
 
     for variant in &enum_.variants {
-        let ident = &variant.name;
+        let ident = &variant.field_name.clone().unwrap();
         match &variant.ty {
-            None |  Some(Type {wraps: None, ident: Category::Tuple { .. }, ..})  => { // unit variant
+            Type {wraps: None, ident: Category::Tuple { .. }, ..}  => { // unit variant
                 l!(body, "Self::{} => s.out.push_str(\"{}\"),", ident, ident)
             },
-            Some(Type{ident: Category::Tuple { contents }, ..}) => {
+            Type{ident: Category::Tuple { contents }, ..} => {
                 let mut names = Vec::new();
                 let mut inner = String::new();
                 for (_, field) in contents.iter().enumerate() {
@@ -336,7 +336,7 @@ pub fn derive_ser_ron_enum(enum_: &Enum) -> TokenStream {
                     inner
                 );
             },
-            Some(Type{ident: Category::UnNamed, wraps, ..}) => {
+            Type{ident: Category::UnNamed, wraps, ..} => {
                 let mut names = Vec::new();
                 let mut inner = String::new();
                 let last = if let Some(ref wraps_inner) = wraps{
@@ -390,14 +390,14 @@ pub fn derive_ser_ron_enum(enum_: &Enum) -> TokenStream {
 pub fn derive_de_ron_enum(enum_: &Enum) -> TokenStream {
     let mut body = String::new();
     for variant in &enum_.variants {
-        let ident = &variant.name;
+        let ident = variant.field_name.clone().unwrap();
 
         match &variant.ty {
-            None |  Some(Type {wraps: None, ident: Category::Tuple { .. }, ..})  => { // unit variant
+            Type {wraps: None, ident: Category::Tuple { .. }, ..}  => { // unit variant
                 l!(body, "\"{}\" => Self::{},", ident, ident)
             },
-            Some(Type{ident: Category::Tuple { contents }, ..}) => {
-                let name = format!("{}::{}", enum_.name, variant.name);
+            Type{ident: Category::Tuple { contents }, ..} => {
+                let name = format!("{}::{}", enum_.name, ident);
                 let fields: Vec<Field> = contents.iter().map(|ty| Field {
                     attributes: Vec::new(),
                     vis: crate::parse::Visibility::Private,
@@ -407,7 +407,7 @@ pub fn derive_de_ron_enum(enum_: &Enum) -> TokenStream {
                 let inner = derive_de_ron_named(&name, &fields, &vec![]);
                 l!(body, "\"{}\" => {}", ident, inner);
             },
-            Some(Type{ident: Category::UnNamed, wraps, ..}) => {
+            Type{ident: Category::UnNamed, wraps, ..} => {
                 let mut inner = String::new();
                 if let Some(wraps) = wraps {
                     for _ in wraps.iter() {

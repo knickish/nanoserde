@@ -14,14 +14,14 @@ use alloc::{format, vec};
 
 use proc_macro::{Delimiter, Group, TokenStream, TokenTree};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct Attribute {
     pub name: String,
     pub tokens: Vec<String>,
 }
 
 #[allow(dead_code)]
-#[derive(Debug, Copy, Clone, PartialEq)]
+#[derive(Debug, Copy, Clone, PartialEq, Hash, Eq)]
 pub enum Visibility {
     Public,
     Crate,
@@ -34,7 +34,7 @@ pub struct Lifetime {
     pub(crate) ident: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct Field {
     pub attributes: Vec<Attribute>,
     pub vis: Visibility,
@@ -126,7 +126,7 @@ pub enum Generic {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Hash, Eq)]
 pub struct Struct {
     pub name: Option<String>,
     pub named: bool,
@@ -207,12 +207,12 @@ impl Generic {
         format!("{}{}", self.lifetime_prefix(), self.full())
     }
 
-    pub fn ident_with_const(&self) -> String {
-        match &self {
-            Generic::ConstGeneric { .. } => self.full_with_const(&[], true),
-            _ => format!("{}{}", self.lifetime_prefix(), self.full()),
-        }
-    }
+    // pub fn ident_with_const(&self) -> String {
+    //     match &self {
+    //         Generic::ConstGeneric { .. } => self.full_with_const(&[], true),
+    //         _ => format!("{}{}", self.lifetime_prefix(), self.full()),
+    //     }
+    // }
 
     pub fn full_with_const(&self, extra_bounds: &[&str], bounds: bool) -> String {
         let bounds = match (bounds, &self) {
@@ -390,11 +390,11 @@ impl Category {
             }
             Category::Never => String::from("!"),
             Category::None => String::new(),
-            Category::AnonymousStruct { contents : Struct { name, named, fields, attributes, generics } } => {
-                let mut l = name.unwrap_or_default();
+            Category::AnonymousStruct { contents : Struct { name, fields, .. } } => {
+                let mut l = name.as_ref().map_or(String::new(), |x| x.clone());
                 l!(l, "{\n");
-                for field in fields {
-                    l!(l, "\t{}: {}\n", field.field_name.expect("field must have name"), field.ty.full());
+                for field in fields.iter() {
+                    l!(l, "\t{}: {}\n", field.field_name.as_ref().expect("field must have name"), field.ty.full());
                 }
                 l!(l, "}\n");
                 l
@@ -417,17 +417,17 @@ impl Type {
         base
     }
 
-    pub fn wraps(&self) -> Vec<String> {
-        let mut ret = vec![self.base()];
-        let Some(wraps) = self.wraps.as_ref() else {
-            return ret;
-        };
+    // pub fn wraps(&self) -> Vec<String> {
+    //     let mut ret = vec![self.base()];
+    //     let Some(wraps) = self.wraps.as_ref() else {
+    //         return ret;
+    //     };
 
-        for wrapped in wraps {
-            ret.extend_from_slice(&wrapped.wraps())
-        }
-        ret
-    }
+    //     for wrapped in wraps {
+    //         ret.extend_from_slice(&wrapped.wraps())
+    //     }
+    //     ret
+    // }
 
     pub fn full(&self) -> String {
         let mut base = match &self.ref_type {
@@ -852,26 +852,29 @@ fn next_type<T: Iterator<Item = TokenTree> + Clone>(mut source: &mut Peekable<T>
     };
 
     
-    if let Some(group) = next_group(&mut source) {
-        let mut group_stream = group.stream().into_iter().peekable();
-
+    if let Some(group) = next_group(&mut source.clone()) {
         match group.delimiter() {
             Delimiter::Bracket => {
+                let mut group_stream = next_group(&mut source).unwrap().stream().into_iter().peekable();
                 return next_array(&mut group_stream).map(|x| x.set_ref_type(ref_type))
             }
-            Delimiter::Parenthesis => return next_tuple(&mut group_stream).map(|x| x.set_ref_type(ref_type)),
+            Delimiter::Parenthesis => {
+                let mut group_stream = next_group(&mut source).unwrap().stream().into_iter().peekable();
+                return next_tuple(&mut group_stream).map(|x| x.set_ref_type(ref_type))
+            },
             Delimiter::Brace => {
-                drop(group_stream);
                 let anonymous_struct = dbg!(next_struct(&mut source ));
+                let wraps = Some(anonymous_struct.fields.iter().map(|x| x.ty.clone()).collect());
                     return Some(Type {
-                    ident: Category::UnNamed,
-                    wraps: Some(anonymous_struct.fields.iter().map(|x| x.ty.clone()).collect()),
+                    ident: Category::AnonymousStruct { contents: anonymous_struct },
+                    wraps,
                     ref_type,
                     as_other: None,
                 })
             }
 
             _ => {
+                let mut group_stream = group.stream().into_iter().peekable();
                 _debug_current_token(&mut group_stream);
                 unimplemented!("Unexpected token: {}", _debug_current_token(&mut group_stream))
             }
@@ -1145,7 +1148,7 @@ fn next_struct<T: Iterator<Item = TokenTree> + Clone>(mut source: &mut Peekable<
     };
 
     let group = group.unwrap();
-    let delimiter = group.delimiter();
+    let delimiter = dbg!(group.delimiter());
     let named = match delimiter {
         Delimiter::Parenthesis => false,
         Delimiter::Brace => true,

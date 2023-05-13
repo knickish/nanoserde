@@ -161,10 +161,10 @@ pub fn derive_ser_bin_enum(enum_: &Enum) -> TokenStream {
 
     for (index, variant) in enum_.variants.iter().enumerate() {
         let lit = format!("{}u16", index);
-        let ident = &variant.field_name.expect("Unnamed enum fields are illegal");
+        let ident = variant.field_name.as_ref().expect("Unnamed enum fields are illegal");
         // Unit
         match &variant.ty {
-            Type {wraps: None, ident: Category::Tuple { .. }, ..}  => { // unit variant
+            Type {wraps: None, ident: Category::None, ..}  => { // unit variant
                 l!(r, "Self::{} => {}.ser_bin(s),", ident, lit);
             },
             Type{ident: Category::Tuple { contents }, ..} => {
@@ -182,20 +182,16 @@ pub fn derive_ser_bin_enum(enum_: &Enum) -> TokenStream {
                 }
                 l!(r, "}")
             },
-           Type{ident: Category::UnNamed, wraps, ..} => {
-                l!(r, "Self::{} {{", variant.name);
-                if let Some(wrapped) = wraps.as_ref() {
-                    for (n, _) in wrapped.iter().enumerate() {
-                        l!(r, "f{}, ", n)
-                    }
+           Type{ident: Category::AnonymousStruct { contents },  ..} => {
+                l!(r, "Self::{} {{", ident);
+                for (_, f) in  contents.fields.iter().enumerate() {
+                    l!(r, "{}, ", f.field_name.as_ref().expect("field must be named"))
                 }
                 
                 l!(r, "} => {");
                 l!(r, "{}.ser_bin(s);", lit);
-                if let Some(wrapped) = wraps.as_ref() {
-                    for (n, _) in wrapped.iter().enumerate() {
-                        l!(r, "f{}.ser_bin(s);", n)
-                    }
+                for (_, f) in contents.fields.iter().enumerate() {
+                    l!(r, "{}.ser_bin(s);", f.field_name.as_ref().expect("field must be named"))
                 }
                 l!(r, "}")
             },
@@ -231,11 +227,11 @@ pub fn derive_de_bin_enum(enum_: &Enum) -> TokenStream {
         dbg!(variant);
 
         match &variant.ty {
-            None |  Some(Type {wraps: None, ident: Category::Tuple { .. }, ..})  => { // unit variant
-                l!(r, "{} => Self::{},", lit, variant.name)
+            Type {wraps: None, ident: Category::None, ..}  => { // unit variant
+                l!(r, "{} => Self::{},", lit, variant.field_name.as_ref().unwrap())
             },
-            Some(Type{ident: Category::Tuple { contents }, ..}) => {
-                l!(r, "{} => Self::{} (", lit, variant.name);
+            Type{ident: Category::Tuple { contents }, ..} => {
+                l!(r, "{} => Self::{} (", lit, variant.field_name.as_ref().unwrap());
                 for _ in contents {
                     l!(
                         r,
@@ -244,10 +240,10 @@ pub fn derive_de_bin_enum(enum_: &Enum) -> TokenStream {
                 }
                 l!(r, "),")
             },
-            Some(Type{ident: Category::UnNamed, wraps: Some(wraps), ..}) => {
-                l!(r, "{} => Self::{} {{", lit, variant.name);
-                for _ in wraps {
-                    l!(r, "DeBin::de_bin(o, d)?,");
+            Type{ident: Category::AnonymousStruct { contents }, ..} => {
+                l!(r, "{} => Self::{} {{", lit, variant.field_name.as_ref().unwrap());
+                for f in contents.fields.iter() {
+                    l!(r, "{}: DeBin::de_bin(o, d)?,", f.field_name.as_ref().unwrap());
                 }
                 l!(r, "},");
             },

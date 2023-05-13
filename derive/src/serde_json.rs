@@ -235,19 +235,20 @@ pub fn derive_ser_json_enum(enum_: &Enum) -> TokenStream {
     let mut r = String::new();
 
     for variant in enum_.variants.iter() {
+        let field_name = variant.field_name.clone().unwrap();
         let json_variant_name =
-            shared::attrs_rename(&variant.attributes).unwrap_or(variant.name.clone());
+            shared::attrs_rename(&variant.attributes).unwrap_or(field_name.clone());
 
             match &variant.ty {
-                None |  Some(Type {wraps: None, ident: Category::Tuple { .. }, ..})  => { // unit variant
+                Type {wraps: None, ident: Category::Tuple { .. }, ..}  => { // unit variant
                     l!(
                         r,
                         "Self::{} => s.label(\"{}\"),",
-                        variant.name,
+                        &field_name,
                         json_variant_name
                     );
                 },
-                Some(Type{ident: Category::Tuple { contents }, ..}) => {
+                Type{ident: Category::Tuple { contents }, ..} => {
                     let mut items = String::new();
                     let mut field_names = vec![];
                     let last = contents.len() - 1;
@@ -309,13 +310,13 @@ pub fn derive_ser_json_enum(enum_: &Enum) -> TokenStream {
                                 s.st_post(d);
                                 s.out.push('}}');
                             }}",
-                        variant.name,
+                        &field_name,
                         field_names.join(","),
                         json_variant_name,
                         items
                     );
                 },
-                Some(Type{ident: Category::UnNamed, wraps, ..}) => {
+                Type{ident: Category::UnNamed, wraps, ..} => {
                     let mut names = Vec::new();
                     let mut inner = String::new();
                     let last = if let Some(ref wraps_inner) = wraps{
@@ -343,7 +344,7 @@ pub fn derive_ser_json_enum(enum_: &Enum) -> TokenStream {
                                 s.out.push(']');
                                 s.out.push('}}');
                             }}",
-                        variant.name,
+                        &field_name,
                         names.join(","),
                         json_variant_name,
                         inner
@@ -379,19 +380,21 @@ pub fn derive_de_json_enum(enum_: &Enum) -> TokenStream {
     let (generic_w_bounds, generic_no_bounds) = enum_bounds_strings(enum_, "DeJson");
 
     for variant in &enum_.variants {
+        let field_name = variant.field_name.clone().unwrap();
         let json_variant_name =
-            shared::attrs_rename(&variant.attributes).unwrap_or(variant.name.clone());
+            shared::attrs_rename(&variant.attributes).unwrap_or(field_name.clone());
+            
 
         match &variant.ty {
-            None |  Some(Type {wraps: None, ident: Category::Tuple { .. }, ..})  => { // unit variant
+            Type {wraps: None, ident: Category::Tuple { .. }, ..} => { // unit variant
                 l!(
                     r_units,
                     "\"{}\" => Self::{},",
                     json_variant_name,
-                    variant.name
+                    &field_name
                 );
             },
-            Some(Type{ident: Category::Tuple { contents }, ..}) => {
+            Type{ident: Category::Tuple { contents }, ..} => {
                 let fields: Vec<Field> = contents.iter().map(|ty| Field {
                     attributes: Vec::new(),
                     vis: crate::parse::Visibility::Private,
@@ -399,10 +402,10 @@ pub fn derive_de_json_enum(enum_: &Enum) -> TokenStream {
                     ty: ty.clone(),
                 }).collect();
                 let body =
-                    derive_de_json_named(&format!("Self::{}", variant.name), false, &fields);
+                    derive_de_json_named(&format!("Self::{}", &field_name), false, &fields);
                 l!(r_rest, "\"{}\" => {{ {} }}, ", json_variant_name, body);
             },
-            Some(Type{ident: Category::UnNamed, wraps, ..}) => {
+            Type{ident: Category::UnNamed, wraps, ..} => {
             let mut field_names = String::new();
                 for _ in wraps {
                     l!(
@@ -414,7 +417,7 @@ pub fn derive_de_json_enum(enum_: &Enum) -> TokenStream {
                     r_rest,
                     "\"{}\" => {{s.block_open(i)?;let r = Self::{}({}); s.block_close(i)?;r}}",
                     json_variant_name,
-                    variant.name,
+                    &field_name,
                     field_names
                 );
             },

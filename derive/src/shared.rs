@@ -74,13 +74,15 @@ pub(crate) fn struct_bounds_strings(struct_: &Struct, bound_name: &str) -> (Stri
     }
     let mut generic_w_bounds = "<".to_string();
     for generic in generics.iter() {
-        let mut bounds = generic.full_with_const(&[format!("nanoserde::{}", bound_name).as_str()] ,true);
+        generic_w_bounds += generic.full_with_const(&[format!("nanoserde::{}", bound_name).as_str()] ,true).as_str();
+        generic_w_bounds += ", ";
     }
     generic_w_bounds += ">";
 
     let mut generic_no_bounds = "<".to_string();
     for generic in generics.iter() {
         generic_no_bounds += generic.ident_only().as_str();
+        generic_no_bounds += ", ";
     }
     generic_no_bounds += ">";
     return (generic_w_bounds, generic_no_bounds);
@@ -94,13 +96,15 @@ pub(crate) fn enum_bounds_strings(enum_: &Enum, bound_name: &str) -> (String, St
     }
     let mut generic_w_bounds = "<".to_string();
     for generic in generics.iter() {
-        let mut bounds = generic.full_with_const(&[format!("nanoserde::{}", bound_name).as_str()] ,true);
+        generic_w_bounds += generic.full_with_const(&[format!("nanoserde::{}", bound_name).as_str()] ,true).as_str();
+        generic_w_bounds += ", ";
     }
     generic_w_bounds += ">";
 
     let mut generic_no_bounds = "<".to_string();
     for generic in generics.iter() {
         generic_no_bounds += generic.ident_only().as_str();
+        generic_no_bounds += ", ";
     }
     generic_no_bounds += ">";
     return (generic_w_bounds, generic_no_bounds);
