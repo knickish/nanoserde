@@ -2,7 +2,7 @@ use alloc::format;
 use alloc::string::String;
 
 use crate::{
-    parse::{Enum, Struct},
+    parse::{Enum, Struct, Category, Type},
     shared::{enum_bounds_strings, struct_bounds_strings},
 };
 
@@ -63,7 +63,7 @@ pub fn derive_ser_bin_struct(struct_: &Struct) -> TokenStream {
                 {}
             }}
         }}",
-        generic_w_bounds, struct_.name, generic_no_bounds, body
+        generic_w_bounds, struct_.name.as_ref().expect("Shouldnt have an anonymous struct here"), generic_no_bounds, body
     )
     .parse()
     .unwrap()
@@ -87,7 +87,7 @@ pub fn derive_ser_bin_struct_unnamed(struct_: &Struct) -> TokenStream {
                 {}
             }}
         }}",
-        generic_w_bounds, struct_.name, generic_no_bounds, body
+        generic_w_bounds, struct_.name.as_ref().expect("Shouldnt have an anonymous struct here"), generic_no_bounds, body
     )
     .parse()
     .unwrap()
@@ -120,7 +120,7 @@ pub fn derive_de_bin_struct(struct_: &Struct) -> TokenStream {
                 }})
             }}
         }}",
-        generic_w_bounds, struct_.name, generic_no_bounds, body
+        generic_w_bounds, struct_.name.as_ref().expect("Shouldnt have an anonymous struct here"), generic_no_bounds, body
     )
     .parse()
     .unwrap()
@@ -149,7 +149,7 @@ pub fn derive_de_bin_struct_unnamed(struct_: &Struct) -> TokenStream {
                 }})
             }}
         }}",
-        generic_w_bounds, struct_.name, generic_no_bounds, body
+        generic_w_bounds, struct_.name.as_ref().expect("Shouldnt have an anonymous struct here"), generic_no_bounds, body
     )
     .parse()
     .unwrap()
@@ -161,37 +161,51 @@ pub fn derive_ser_bin_enum(enum_: &Enum) -> TokenStream {
 
     for (index, variant) in enum_.variants.iter().enumerate() {
         let lit = format!("{}u16", index);
-        let ident = &variant.name;
+        let ident = &variant.field_name.expect("Unnamed enum fields are illegal");
         // Unit
-        if variant.fields.len() == 0 {
-            l!(r, "Self::{} => {}.ser_bin(s),", ident, lit);
-        }
-        // Named
-        else if variant.named {
-            l!(r, "Self::{} {{", variant.name);
-            for field in &variant.fields {
-                l!(r, "{}, ", field.field_name.as_ref().unwrap())
+        match &variant.ty {
+            Type {wraps: None, ident: Category::Tuple { .. }, ..}  => { // unit variant
+                l!(r, "Self::{} => {}.ser_bin(s),", ident, lit);
+            },
+            Type{ident: Category::Tuple { contents }, ..} => {
+                l!(r, "Self::{} (", ident);
+                for field in contents {
+                    l!(r, "{}, ", field.base())
+                }
+                l!(r, ") => {");
+                l!(r, "{}.ser_bin(s);", lit);
+                for field in contents {
+                    let Type{ident: Category::Named{path}, ..} = field else {
+                        panic!("Expected a named field, got type {}", field.full());
+                    };
+                    l!(r, "{}.ser_bin(s);", path)
+                }
+                l!(r, "}")
+            },
+           Type{ident: Category::UnNamed, wraps, ..} => {
+                l!(r, "Self::{} {{", variant.name);
+                if let Some(wrapped) = wraps.as_ref() {
+                    for (n, _) in wrapped.iter().enumerate() {
+                        l!(r, "f{}, ", n)
+                    }
+                }
+                
+                l!(r, "} => {");
+                l!(r, "{}.ser_bin(s);", lit);
+                if let Some(wrapped) = wraps.as_ref() {
+                    for (n, _) in wrapped.iter().enumerate() {
+                        l!(r, "f{}.ser_bin(s);", n)
+                    }
+                }
+                l!(r, "}")
+            },
+            v => {
+                dbg!(v);
+                unimplemented!()
             }
-            l!(r, "} => {");
-            l!(r, "{}.ser_bin(s);", lit);
-            for field in &variant.fields {
-                l!(r, "{}.ser_bin(s);", field.field_name.as_ref().unwrap())
-            }
-            l!(r, "}")
-        }
-        // Unnamed
-        else if variant.named == false {
-            l!(r, "Self::{} (", variant.name);
-            for (n, _) in variant.fields.iter().enumerate() {
-                l!(r, "f{}, ", n)
-            }
-            l!(r, ") => {");
-            l!(r, "{}.ser_bin(s);", lit);
-            for (n, _) in variant.fields.iter().enumerate() {
-                l!(r, "f{}.ser_bin(s);", n)
-            }
-            l!(r, "}")
-        }
+
+
+        };
     }
 
     format!(
@@ -214,34 +228,38 @@ pub fn derive_de_bin_enum(enum_: &Enum) -> TokenStream {
 
     for (index, variant) in enum_.variants.iter().enumerate() {
         let lit = format!("{}u16", index);
+        dbg!(variant);
 
-        // Unit
-        if variant.fields.len() == 0 {
-            l!(r, "{} => Self::{},", lit, variant.name)
-        }
-        // Named
-        else if variant.named {
-            l!(r, "{} => Self::{} {{", lit, variant.name);
-            for field in &variant.fields {
-                l!(
-                    r,
-                    "{}: DeBin::de_bin(o, d)?,",
-                    field.field_name.as_ref().unwrap()
-                );
+        match &variant.ty {
+            None |  Some(Type {wraps: None, ident: Category::Tuple { .. }, ..})  => { // unit variant
+                l!(r, "{} => Self::{},", lit, variant.name)
+            },
+            Some(Type{ident: Category::Tuple { contents }, ..}) => {
+                l!(r, "{} => Self::{} (", lit, variant.name);
+                for _ in contents {
+                    l!(
+                        r,
+                        "DeBin::de_bin(o, d)?,",
+                    );
+                }
+                l!(r, "),")
+            },
+            Some(Type{ident: Category::UnNamed, wraps: Some(wraps), ..}) => {
+                l!(r, "{} => Self::{} {{", lit, variant.name);
+                for _ in wraps {
+                    l!(r, "DeBin::de_bin(o, d)?,");
+                }
+                l!(r, "},");
+            },
+            v => {
+                dbg!(v);
+                unimplemented!()
             }
-            l!(r, "},");
-        }
-        // Unnamed
-        else if variant.named == false {
-            l!(r, "{} => Self::{} (", lit, variant.name);
-            for _ in &variant.fields {
-                l!(r, "DeBin::de_bin(o, d)?,");
-            }
-            l!(r, "),");
-        }
+
+        };
     }
 
-    format!(
+    dbg!(format!(
         "impl{}  DeBin for {}{} {{
             fn de_bin(o:&mut usize, d:&[u8]) -> core::result::Result<Self, nanoserde::DeBinErr> {{
                 let id: u16 = DeBin::de_bin(o,d)?;
@@ -250,7 +268,7 @@ pub fn derive_de_bin_enum(enum_: &Enum) -> TokenStream {
                     _ => return core::result::Result::Err(nanoserde::DeBinErr{{o:*o, l:0, s:d.len()}})
                 }})
             }}
-        }}", generic_w_bounds,enum_.name,generic_no_bounds, r)
+        }}", generic_w_bounds,enum_.name,generic_no_bounds, r))
         .parse()
         .unwrap()
 }
