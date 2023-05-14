@@ -242,8 +242,7 @@ pub fn derive_ser_bin_enum(enum_: &Enum) -> TokenStream {
                 l!(r, "}")
             }
             v => {
-                dbg!(v);
-                unimplemented!()
+                unimplemented!("Unexpected type in enum: {:?}", v)
             }
         };
     }
@@ -268,7 +267,6 @@ pub fn derive_de_bin_enum(enum_: &Enum) -> TokenStream {
 
     for (index, variant) in enum_.variants.iter().enumerate() {
         let lit = format!("{}u16", index);
-        dbg!(variant);
 
         match &variant.ty {
             Type {
@@ -319,13 +317,12 @@ pub fn derive_de_bin_enum(enum_: &Enum) -> TokenStream {
                 l!(r, "},");
             }
             v => {
-                dbg!(v);
-                unimplemented!()
+                unimplemented!("Unexpected type in enum: {:?}", v)
             }
         };
     }
 
-    dbg!(format!(
+    format!(
         "impl{}  DeBin for {}{} {{
             fn de_bin(o:&mut usize, d:&[u8]) -> core::result::Result<Self, nanoserde::DeBinErr> {{
                 let id: u16 = DeBin::de_bin(o,d)?;
@@ -334,7 +331,7 @@ pub fn derive_de_bin_enum(enum_: &Enum) -> TokenStream {
                     _ => return core::result::Result::Err(nanoserde::DeBinErr{{o:*o, l:0, s:d.len()}})
                 }})
             }}
-        }}", generic_w_bounds,enum_.name,generic_no_bounds, r))
+        }}", generic_w_bounds,enum_.name,generic_no_bounds, r)
         .parse()
         .unwrap()
 }

@@ -387,8 +387,7 @@ pub fn derive_ser_ron_enum(enum_: &Enum) -> TokenStream {
                 )
             }
             v => {
-                dbg!(v);
-                unimplemented!()
+                unimplemented!("Unexpected type in enum: {:?}", v)
             }
         };
     }
@@ -459,8 +458,7 @@ pub fn derive_de_ron_enum(enum_: &Enum) -> TokenStream {
                 );
             }
             v => {
-                dbg!(v);
-                unimplemented!()
+                unimplemented!("Unexpected type in enum: {:?}", v)
             }
         };
     }

@@ -136,13 +136,6 @@ pub struct Struct {
 }
 
 #[derive(Debug)]
-pub struct EnumVariant {
-    pub name: String,
-    pub ty: Option<Type>,
-    pub attributes: Vec<Attribute>,
-}
-
-#[derive(Debug)]
 pub struct Enum {
     pub name: String,
     pub variants: Vec<Field>,
@@ -206,13 +199,6 @@ impl Generic {
     pub fn ident_only(&self) -> String {
         format!("{}{}", self.lifetime_prefix(), self.full())
     }
-
-    // pub fn ident_with_const(&self) -> String {
-    //     match &self {
-    //         Generic::ConstGeneric { .. } => self.full_with_const(&[], true),
-    //         _ => format!("{}{}", self.lifetime_prefix(), self.full()),
-    //     }
-    // }
 
     pub fn full_with_const(&self, extra_bounds: &[&str], bounds: bool) -> String {
         let bounds = match (bounds, &self) {
@@ -439,18 +425,6 @@ impl Type {
         base.push_str(&self.ident.path(&self, false));
         base
     }
-
-    // pub fn wraps(&self) -> Vec<String> {
-    //     let mut ret = vec![self.base()];
-    //     let Some(wraps) = self.wraps.as_ref() else {
-    //         return ret;
-    //     };
-
-    //     for wrapped in wraps {
-    //         ret.extend_from_slice(&wrapped.wraps())
-    //     }
-    //     ret
-    // }
 
     pub fn full(&self) -> String {
         let mut base = match &self.ref_type {
@@ -896,7 +870,7 @@ fn next_type<T: Iterator<Item = TokenTree> + Clone>(mut source: &mut Peekable<T>
                 return next_tuple(&mut group_stream).map(|x| x.set_ref_type(ref_type));
             }
             Delimiter::Brace => {
-                let anonymous_struct = dbg!(next_struct(&mut source));
+                let anonymous_struct = next_struct(&mut source);
                 let wraps = Some(
                     anonymous_struct
                         .fields
@@ -1189,7 +1163,7 @@ fn next_struct<T: Iterator<Item = TokenTree> + Clone>(mut source: &mut Peekable<
     };
 
     let group = group.unwrap();
-    let delimiter = dbg!(group.delimiter());
+    let delimiter = group.delimiter();
     let named = match delimiter {
         Delimiter::Parenthesis => false,
         Delimiter::Brace => true,
