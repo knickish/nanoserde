@@ -116,26 +116,6 @@ fn de_container_default() {
 
 #[test]
 fn rename() {
-
-    // impl SerJson for Test {
-    //     fn ser_json(&self, d: usize, s: &mut nanoserde::SerJsonState) {
-    //         s.st_pre();
-    //         let mut first_field_was_serialized = false;
-    //         if first_field_was_serialized {
-    //             s.conl();
-    //         };
-    //         first_field_was_serialized = true;
-    //         s.field(d + 1, "fooField");
-    //         self.a.ser_json(d + 1, s);
-    //         if first_field_was_serialized {
-    //             s.conl();
-    //         };
-    //         first_field_was_serialized = true;
-    //         s.field(d + 1, "barField");
-    //         self.b.ser_json(d + 1, s);
-    //         s.st_post(d);
-    //     }
-    // }
     #[derive(DeJson, SerJson, PartialEq)]
     #[nserde(default)]
     pub struct Test {

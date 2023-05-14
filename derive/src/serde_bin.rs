@@ -2,7 +2,7 @@ use alloc::format;
 use alloc::string::String;
 
 use crate::{
-    parse::{Enum, Struct, Category, Type},
+    parse::{Category, Enum, Struct, Type},
     shared::{enum_bounds_strings, struct_bounds_strings},
 };
 
@@ -63,7 +63,13 @@ pub fn derive_ser_bin_struct(struct_: &Struct) -> TokenStream {
                 {}
             }}
         }}",
-        generic_w_bounds, struct_.name.as_ref().expect("Shouldnt have an anonymous struct here"), generic_no_bounds, body
+        generic_w_bounds,
+        struct_
+            .name
+            .as_ref()
+            .expect("Shouldnt have an anonymous struct here"),
+        generic_no_bounds,
+        body
     )
     .parse()
     .unwrap()
@@ -87,7 +93,13 @@ pub fn derive_ser_bin_struct_unnamed(struct_: &Struct) -> TokenStream {
                 {}
             }}
         }}",
-        generic_w_bounds, struct_.name.as_ref().expect("Shouldnt have an anonymous struct here"), generic_no_bounds, body
+        generic_w_bounds,
+        struct_
+            .name
+            .as_ref()
+            .expect("Shouldnt have an anonymous struct here"),
+        generic_no_bounds,
+        body
     )
     .parse()
     .unwrap()
@@ -120,7 +132,13 @@ pub fn derive_de_bin_struct(struct_: &Struct) -> TokenStream {
                 }})
             }}
         }}",
-        generic_w_bounds, struct_.name.as_ref().expect("Shouldnt have an anonymous struct here"), generic_no_bounds, body
+        generic_w_bounds,
+        struct_
+            .name
+            .as_ref()
+            .expect("Shouldnt have an anonymous struct here"),
+        generic_no_bounds,
+        body
     )
     .parse()
     .unwrap()
@@ -149,7 +167,13 @@ pub fn derive_de_bin_struct_unnamed(struct_: &Struct) -> TokenStream {
                 }})
             }}
         }}",
-        generic_w_bounds, struct_.name.as_ref().expect("Shouldnt have an anonymous struct here"), generic_no_bounds, body
+        generic_w_bounds,
+        struct_
+            .name
+            .as_ref()
+            .expect("Shouldnt have an anonymous struct here"),
+        generic_no_bounds,
+        body
     )
     .parse()
     .unwrap()
@@ -161,13 +185,24 @@ pub fn derive_ser_bin_enum(enum_: &Enum) -> TokenStream {
 
     for (index, variant) in enum_.variants.iter().enumerate() {
         let lit = format!("{}u16", index);
-        let ident = variant.field_name.as_ref().expect("Unnamed enum fields are illegal");
+        let ident = variant
+            .field_name
+            .as_ref()
+            .expect("Unnamed enum fields are illegal");
         // Unit
         match &variant.ty {
-            Type {wraps: None, ident: Category::None, ..}  => { // unit variant
+            Type {
+                wraps: None,
+                ident: Category::None,
+                ..
+            } => {
+                // unit variant
                 l!(r, "Self::{} => {}.ser_bin(s),", ident, lit);
-            },
-            Type{ident: Category::Tuple { contents }, ..} => {
+            }
+            Type {
+                ident: Category::Tuple { contents },
+                ..
+            } => {
                 l!(r, "Self::{} (", ident);
                 for field in contents {
                     l!(r, "{}, ", field.base())
@@ -181,26 +216,35 @@ pub fn derive_ser_bin_enum(enum_: &Enum) -> TokenStream {
                     l!(r, "{}.ser_bin(s);", path)
                 }
                 l!(r, "}")
-            },
-           Type{ident: Category::AnonymousStruct { contents },  ..} => {
+            }
+            Type {
+                ident: Category::AnonymousStruct { contents },
+                ..
+            } => {
                 l!(r, "Self::{} {{", ident);
-                for (_, f) in  contents.fields.iter().enumerate() {
-                    l!(r, "{}, ", f.field_name.as_ref().expect("field must be named"))
+                for (_, f) in contents.fields.iter().enumerate() {
+                    l!(
+                        r,
+                        "{}, ",
+                        f.field_name.as_ref().expect("field must be named")
+                    )
                 }
-                
+
                 l!(r, "} => {");
                 l!(r, "{}.ser_bin(s);", lit);
                 for (_, f) in contents.fields.iter().enumerate() {
-                    l!(r, "{}.ser_bin(s);", f.field_name.as_ref().expect("field must be named"))
+                    l!(
+                        r,
+                        "{}.ser_bin(s);",
+                        f.field_name.as_ref().expect("field must be named")
+                    )
                 }
                 l!(r, "}")
-            },
+            }
             v => {
                 dbg!(v);
                 unimplemented!()
             }
-
-
         };
     }
 
@@ -227,31 +271,57 @@ pub fn derive_de_bin_enum(enum_: &Enum) -> TokenStream {
         dbg!(variant);
 
         match &variant.ty {
-            Type {wraps: None, ident: Category::None, ..}  => { // unit variant
-                l!(r, "{} => Self::{},", lit, variant.field_name.as_ref().unwrap())
-            },
-            Type{ident: Category::Tuple { contents }, ..} => {
-                l!(r, "{} => Self::{} (", lit, variant.field_name.as_ref().unwrap());
+            Type {
+                wraps: None,
+                ident: Category::None,
+                ..
+            } => {
+                // unit variant
+                l!(
+                    r,
+                    "{} => Self::{},",
+                    lit,
+                    variant.field_name.as_ref().unwrap()
+                )
+            }
+            Type {
+                ident: Category::Tuple { contents },
+                ..
+            } => {
+                l!(
+                    r,
+                    "{} => Self::{} (",
+                    lit,
+                    variant.field_name.as_ref().unwrap()
+                );
                 for _ in contents {
-                    l!(
-                        r,
-                        "DeBin::de_bin(o, d)?,",
-                    );
+                    l!(r, "DeBin::de_bin(o, d)?,",);
                 }
                 l!(r, "),")
-            },
-            Type{ident: Category::AnonymousStruct { contents }, ..} => {
-                l!(r, "{} => Self::{} {{", lit, variant.field_name.as_ref().unwrap());
+            }
+            Type {
+                ident: Category::AnonymousStruct { contents },
+                ..
+            } => {
+                l!(
+                    r,
+                    "{} => Self::{} {{",
+                    lit,
+                    variant.field_name.as_ref().unwrap()
+                );
                 for f in contents.fields.iter() {
-                    l!(r, "{}: DeBin::de_bin(o, d)?,", f.field_name.as_ref().unwrap());
+                    l!(
+                        r,
+                        "{}: DeBin::de_bin(o, d)?,",
+                        f.field_name.as_ref().unwrap()
+                    );
                 }
                 l!(r, "},");
-            },
+            }
             v => {
                 dbg!(v);
                 unimplemented!()
             }
-
         };
     }
 

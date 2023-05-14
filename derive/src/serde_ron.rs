@@ -2,7 +2,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::{vec, vec::Vec};
 
-use crate::parse::{Attribute, Enum, Field, Struct, Type, Category};
+use crate::parse::{Attribute, Category, Enum, Field, Struct, Type};
 
 use proc_macro::TokenStream;
 
@@ -43,7 +43,7 @@ pub fn derive_ser_ron_struct(struct_: &Struct) -> TokenStream {
         let struct_fieldname = field.field_name.clone().unwrap();
         let ron_fieldname =
             shared::attrs_rename(&field.attributes).unwrap_or_else(|| struct_fieldname.clone());
-        if field.ty.base() == "Option"{
+        if field.ty.base() == "Option" {
             l!(
                 s,
                 "if let Some(t) = &self.{} {{
@@ -76,7 +76,11 @@ pub fn derive_ser_ron_struct(struct_: &Struct) -> TokenStream {
             }}
         }}
     ",
-        struct_.name.as_ref().expect("Cannot implement for anonymous struct"), s
+        struct_
+            .name
+            .as_ref()
+            .expect("Cannot implement for anonymous struct"),
+        s
     )
     .parse()
     .unwrap()
@@ -101,7 +105,11 @@ pub fn derive_ser_ron_struct_unnamed(struct_: &Struct) -> TokenStream {
                 s.out.push(')');
             }}
         }}",
-        struct_.name.as_ref().expect("Cannot implement for anonymous struct"), body
+        struct_
+            .name
+            .as_ref()
+            .expect("Cannot implement for anonymous struct"),
+        body
     )
     .parse()
     .unwrap()
@@ -129,7 +137,7 @@ pub fn derive_de_ron_named(
                 if field.ty.base() == "String" {
                     val = format!("\"{}\".to_string()", val)
                 }
-                if field.ty.base() == "Option"{
+                if field.ty.base() == "Option" {
                     val = format!("Some({})", val);
                 }
                 Some(val)
@@ -245,7 +253,14 @@ pub fn derive_de_ron_named(
 }
 
 pub fn derive_de_ron_struct(struct_: &Struct) -> TokenStream {
-    let body = derive_de_ron_named(&struct_.name.as_ref().expect("Cannot implement for anonymous struct"), &struct_.fields, &struct_.attributes);
+    let body = derive_de_ron_named(
+        &struct_
+            .name
+            .as_ref()
+            .expect("Cannot implement for anonymous struct"),
+        &struct_.fields,
+        &struct_.attributes,
+    );
 
     format!(
         "impl DeRon for {} {{
@@ -289,17 +304,23 @@ pub fn derive_ser_ron_enum(enum_: &Enum) -> TokenStream {
     for variant in &enum_.variants {
         let ident = &variant.field_name.clone().unwrap();
         match &variant.ty {
-            Type {wraps: None, ident: Category::Tuple { .. }, ..}  => { // unit variant
+            Type {
+                ident: Category::None,
+                ..
+            } => {
+                // unit variant
                 l!(body, "Self::{} => s.out.push_str(\"{}\"),", ident, ident)
-            },
-            Type{ident: Category::Tuple { contents }, ..} => {
+            }
+            Type {
+                ident: Category::AnonymousStruct { contents },
+                ..
+            } => {
                 let mut names = Vec::new();
                 let mut inner = String::new();
-                for (_, field) in contents.iter().enumerate() {
-
-                    let name = field.full();
+                for (_, field) in contents.fields.iter().enumerate() {
+                    let name = field.field_name.as_ref().unwrap();
                     names.push(name.clone());
-                    if field.base() == "Option" {
+                    if field.ty.base() == "Option" {
                         l!(
                             inner,
                             "if {}.is_some() {{
@@ -335,16 +356,15 @@ pub fn derive_ser_ron_enum(enum_: &Enum) -> TokenStream {
                     ident,
                     inner
                 );
-            },
-            Type{ident: Category::UnNamed, wraps, ..} => {
+            }
+            Type {
+                ident: Category::Tuple { contents },
+                ..
+            } => {
                 let mut names = Vec::new();
                 let mut inner = String::new();
-                let last = if let Some(ref wraps_inner) = wraps{
-                    wraps_inner.len() - 1
-                } else {
-                    0
-                };
-                for (index, _) in &mut wraps.iter().enumerate() {
+                let last = contents.len() - 1;
+                for (index, _) in &mut contents.iter().enumerate() {
                     let name = format!("f{}", index);
                     l!(inner, "{}.ser_ron(d, s);", name);
                     if index != last {
@@ -365,7 +385,7 @@ pub fn derive_ser_ron_enum(enum_: &Enum) -> TokenStream {
                     ident,
                     inner
                 )
-            },
+            }
             v => {
                 dbg!(v);
                 unimplemented!()
@@ -393,34 +413,38 @@ pub fn derive_de_ron_enum(enum_: &Enum) -> TokenStream {
         let ident = variant.field_name.clone().unwrap();
 
         match &variant.ty {
-            Type {wraps: None, ident: Category::Tuple { .. }, ..}  => { // unit variant
+            Type {
+                wraps: None,
+                ident: Category::None,
+                ..
+            } => {
+                // unit variant
                 l!(body, "\"{}\" => Self::{},", ident, ident)
-            },
-            Type{ident: Category::Tuple { contents }, ..} => {
+            }
+            Type {
+                ident: Category::AnonymousStruct { contents },
+                ..
+            } => {
                 let name = format!("{}::{}", enum_.name, ident);
-                let fields: Vec<Field> = contents.iter().map(|ty| Field {
-                    attributes: Vec::new(),
-                    vis: crate::parse::Visibility::Private,
-                    field_name: Some(ty.full()),
-                    ty: ty.clone(),
-                }).collect();
-                let inner = derive_de_ron_named(&name, &fields, &vec![]);
+                let inner = derive_de_ron_named(&name, &contents.fields, &vec![]);
                 l!(body, "\"{}\" => {}", ident, inner);
-            },
-            Type{ident: Category::UnNamed, wraps, ..} => {
+            }
+            Type {
+                ident: Category::Tuple { contents },
+                ..
+            } => {
                 let mut inner = String::new();
-                if let Some(wraps) = wraps {
-                    for _ in wraps.iter() {
-                        l!(
-                            inner,
-                            "{
-                                let r = DeRon::de_ron(s, i)?;
-                                s.eat_comma_paren(i)?;
-                                r
-                            }, "
-                        )
-                    }
+                for _ in contents.iter() {
+                    l!(
+                        inner,
+                        "{
+                            let r = DeRon::de_ron(s, i)?;
+                            s.eat_comma_paren(i)?;
+                            r
+                        }, "
+                    )
                 }
+
                 l!(
                     body,
                     "\"{}\" => {{
@@ -433,12 +457,11 @@ pub fn derive_de_ron_enum(enum_: &Enum) -> TokenStream {
                     ident,
                     inner
                 );
-            },
+            }
             v => {
                 dbg!(v);
                 unimplemented!()
             }
-    
         };
     }
 

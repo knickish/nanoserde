@@ -77,7 +77,13 @@ pub fn derive_ser_json_struct(struct_: &Struct) -> TokenStream {
             }}
         }}
     ",
-        generic_w_bounds, struct_.name.as_ref().expect("Cannot implement for anonymous struct"), generic_no_bounds, s
+        generic_w_bounds,
+        struct_
+            .name
+            .as_ref()
+            .expect("Cannot implement for anonymous struct"),
+        generic_no_bounds,
+        s
     )
     .parse()
     .unwrap()
@@ -99,7 +105,11 @@ pub fn derive_de_json_named(name: &str, defaults: bool, fields: &[Field]) -> Tok
         let field_attr_default_with = shared::attrs_default_with(&field.attributes);
         let default_val = if let Some(v) = field_attr_default {
             if let Some(mut val) = v {
-                if field.ty.full() == "String" {
+                if field.ty.base() == "String"
+                    || field.ty.wraps.as_ref().map_or(false, |wrapped| {
+                        wrapped.iter().any(|ty| ty.base() == "String")
+                    })
+                {
                     val = format!("\"{}\".to_string()", val)
                 }
                 if field.ty.base() == "Option" {
@@ -214,7 +224,10 @@ pub fn derive_de_json_proxy(proxy_type: &str, type_: &str) -> TokenStream {
 
 pub fn derive_de_json_struct(struct_: &Struct) -> TokenStream {
     let body = derive_de_json_named(
-        &struct_.name.as_ref().expect("Cannot implement for anonymous struct"),
+        &struct_
+            .name
+            .as_ref()
+            .expect("Cannot implement for anonymous struct"),
         shared::attrs_default(&struct_.attributes).is_some()
             || shared::attrs_default_with(&struct_.attributes).is_some(),
         &struct_.fields[..],
@@ -239,69 +252,78 @@ pub fn derive_ser_json_enum(enum_: &Enum) -> TokenStream {
         let json_variant_name =
             shared::attrs_rename(&variant.attributes).unwrap_or(field_name.clone());
 
-            match &variant.ty {
-                Type {wraps: None, ident: Category::Tuple { .. }, ..}  => { // unit variant
-                    l!(
-                        r,
-                        "Self::{} => s.label(\"{}\"),",
-                        &field_name,
-                        json_variant_name
-                    );
-                },
-                Type{ident: Category::Tuple { contents }, ..} => {
-                    let mut items = String::new();
-                    let mut field_names = vec![];
-                    let last = contents.len() - 1;
-                    for (index, field) in contents.iter().enumerate() {
-                        let name = field.base();
-                            let proxied_field =
-                                if let Some(proxy) = crate::shared::attrs_proxy(&variant.attributes) {
-                                    format!("{{let proxy: {} = Into::into(&{});proxy}}", proxy, name)
-                                } else {
-                                    format!("{}", name)
-                                };
-        
-                            if index == last {
-                                if field.base() == "Option"{
-                                    l!(
-                                        items,
-                                        "if {}.is_some(){{s.field(d+1, \"{}\");{}.ser_json(d+1, s);}}",
-                                        name,
-                                        name,
-                                        proxied_field
-                                    )
-                                } else {
-                                    l!(
-                                        items,
-                                        "s.field(d+1, \"{}\");{}.ser_json(d+1, s);",
-                                        name,
-                                        proxied_field
-                                    )
-                                }
+        match &variant.ty {
+            Type {
+                wraps: None,
+                ident: Category::None,
+                ..
+            } => {
+                // unit variant
+                l!(
+                    r,
+                    "Self::{} => s.label(\"{}\"),",
+                    &field_name,
+                    json_variant_name
+                );
+            }
+
+            Type {
+                ident: Category::AnonymousStruct { contents },
+                ..
+            } => {
+                let mut items = String::new();
+                let mut field_names = vec![];
+                let last = contents.fields.len() - 1;
+                for (index, field) in contents.fields.iter().enumerate() {
+                    if let Some(name) = &&field.field_name {
+                        let proxied_field =
+                            if let Some(proxy) = crate::shared::attrs_proxy(&variant.attributes) {
+                                format!("{{let proxy: {} = Into::into(&{});proxy}}", proxy, name)
                             } else {
-                                if field.base() == "Option" {
-                                    l!(
+                                format!("{}", name)
+                            };
+
+                        if index == last {
+                            if field.ty.base() == "Option" {
+                                l!(
+                                    items,
+                                    "if {}.is_some(){{s.field(d+1, \"{}\");{}.ser_json(d+1, s);}}",
+                                    name,
+                                    name,
+                                    proxied_field
+                                )
+                            } else {
+                                l!(
+                                    items,
+                                    "s.field(d+1, \"{}\");{}.ser_json(d+1, s);",
+                                    name,
+                                    proxied_field
+                                )
+                            }
+                        } else {
+                            if field.ty.base() == "Option" {
+                                l!(
                                         items,
                                         "if {}.is_some(){{s.field(d+1, \"{}\");{}.ser_json(d+1, s);s.conl();}}",
                                         name,
                                         name,
                                         proxied_field
                                     );
-                                } else {
-                                    l!(
-                                        items,
-                                        "s.field(d+1, \"{}\");{}.ser_json(d+1, s);s.conl();",
-                                        name,
-                                        proxied_field
-                                    );
-                                }
+                            } else {
+                                l!(
+                                    items,
+                                    "s.field(d+1, \"{}\");{}.ser_json(d+1, s);s.conl();",
+                                    name,
+                                    proxied_field
+                                );
                             }
-                            field_names.push(name.clone());
-                        
+                        }
+                        field_names.push(name.clone());
                     }
-                    l!(
-                        r,
-                        "Self::{} {{ {} }} => {{
+                }
+                l!(
+                    r,
+                    "Self::{} {{ {} }} => {{
                                 s.out.push('{{');
                                 s.label(\"{}\");
                                 s.out.push(':');
@@ -310,32 +332,31 @@ pub fn derive_ser_json_enum(enum_: &Enum) -> TokenStream {
                                 s.st_post(d);
                                 s.out.push('}}');
                             }}",
-                        &field_name,
-                        field_names.join(","),
-                        json_variant_name,
-                        items
-                    );
-                },
-                Type{ident: Category::UnNamed, wraps, ..} => {
-                    let mut names = Vec::new();
-                    let mut inner = String::new();
-                    let last = if let Some(ref wraps_inner) = wraps{
-                        wraps_inner.len() - 1
+                    &field_name,
+                    field_names.join(","),
+                    json_variant_name,
+                    items
+                );
+            }
+            Type {
+                ident: Category::Tuple { contents },
+                ..
+            } => {
+                let mut names = Vec::new();
+                let mut inner = String::new();
+                let last = contents.len() - 1;
+                for (index, _) in contents.iter().enumerate() {
+                    let field_name = format!("f{}", index);
+                    names.push(field_name.clone());
+                    if index != last {
+                        l!(inner, "{}.ser_json(d, s); s.out.push(',');", field_name);
                     } else {
-                        0
-                    };
-                    for (index, _) in wraps.iter().enumerate() {
-                        let field_name = format!("f{}", index);
-                        names.push(field_name.clone());
-                        if index != last {
-                            l!(inner, "{}.ser_json(d, s); s.out.push(',');", field_name);
-                        } else {
-                            l!(inner, "{}.ser_json(d, s);", field_name);
-                        }
+                        l!(inner, "{}.ser_json(d, s);", field_name);
                     }
-                    l!(
-                        r,
-                        "Self::{}  ({}) => {{
+                }
+                l!(
+                    r,
+                    "Self::{}  ({}) => {{
                                 s.out.push('{{');
                                 s.label(\"{}\");
                                 s.out.push(':');
@@ -344,19 +365,17 @@ pub fn derive_ser_json_enum(enum_: &Enum) -> TokenStream {
                                 s.out.push(']');
                                 s.out.push('}}');
                             }}",
-                        &field_name,
-                        names.join(","),
-                        json_variant_name,
-                        inner
-                    );
-                },
-                v => {
-                    dbg!(v);
-                    unimplemented!()
-                }
-    
-    
-            };
+                    &field_name,
+                    names.join(","),
+                    json_variant_name,
+                    inner
+                );
+            }
+            v => {
+                dbg!(v);
+                unimplemented!()
+            }
+        };
     }
 
     format!(
@@ -383,31 +402,38 @@ pub fn derive_de_json_enum(enum_: &Enum) -> TokenStream {
         let field_name = variant.field_name.clone().unwrap();
         let json_variant_name =
             shared::attrs_rename(&variant.attributes).unwrap_or(field_name.clone());
-            
 
         match &variant.ty {
-            Type {wraps: None, ident: Category::Tuple { .. }, ..} => { // unit variant
+            Type {
+                wraps: None,
+                ident: Category::None,
+                ..
+            } => {
+                // unit variant
                 l!(
                     r_units,
                     "\"{}\" => Self::{},",
                     json_variant_name,
                     &field_name
                 );
-            },
-            Type{ident: Category::Tuple { contents }, ..} => {
-                let fields: Vec<Field> = contents.iter().map(|ty| Field {
-                    attributes: Vec::new(),
-                    vis: crate::parse::Visibility::Private,
-                    field_name: Some(ty.full()),
-                    ty: ty.clone(),
-                }).collect();
-                let body =
-                    derive_de_json_named(&format!("Self::{}", &field_name), false, &fields);
+            }
+            Type {
+                ident: Category::AnonymousStruct { contents },
+                ..
+            } => {
+                let body = derive_de_json_named(
+                    &format!("Self::{}", &field_name),
+                    false,
+                    &contents.fields,
+                );
                 l!(r_rest, "\"{}\" => {{ {} }}, ", json_variant_name, body);
-            },
-            Type{ident: Category::UnNamed, wraps, ..} => {
-            let mut field_names = String::new();
-                for _ in wraps {
+            }
+            Type {
+                ident: Category::Tuple { contents },
+                ..
+            } => {
+                let mut field_names = String::new();
+                for _ in contents.iter() {
                     l!(
                         field_names,
                         "{let r = DeJson::de_json(s,i)?;s.eat_comma_block(i)?;r},"
@@ -420,16 +446,13 @@ pub fn derive_de_json_enum(enum_: &Enum) -> TokenStream {
                     &field_name,
                     field_names
                 );
-            },
+            }
             v => {
                 dbg!(v);
                 unimplemented!()
             }
-    
         };
     }
-
-    
 
     let mut r = format!(
         "impl{} DeJson for {}{} {{
@@ -518,7 +541,13 @@ pub fn derive_ser_json_struct_unnamed(struct_: &Struct) -> TokenStream {
                 {}
             }}
         }}",
-        generic_w_bounds, struct_.name.as_ref().expect("Cannot implement for anonymous struct"), generic_no_bounds, body
+        generic_w_bounds,
+        struct_
+            .name
+            .as_ref()
+            .expect("Cannot implement for anonymous struct"),
+        generic_no_bounds,
+        body
     )
     .parse()
     .unwrap()
