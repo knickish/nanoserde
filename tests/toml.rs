@@ -3,6 +3,7 @@ use hashbrown::HashMap;
 #[cfg(not(feature = "no_std"))]
 use std::collections::HashMap;
 
+#[cfg(feature = "toml")]
 use nanoserde::Toml;
 use nanoserde::TomlParser;
 
