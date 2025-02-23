@@ -265,11 +265,51 @@ impl DeBin for String {
 #[inline]
 /// This function relies on ExactSizeIterator trait to get the length of the iterator,
 /// do not use for types which may report an incorrect size hint
-fn ser_iter<T: SerBin>(iter: &mut dyn ExactSizeIterator<Item = &T>, s: &mut Vec<u8>) {
+fn ser_collection<T: SerBin>(iter: &mut dyn ExactSizeIterator<Item = &T>, s: &mut Vec<u8>) {
     iter.size_hint().0.ser_bin(s);
     for item in iter {
         item.ser_bin(s);
     }
+}
+
+trait ExtendReserve<T> {
+    fn reserve(&mut self, additional: usize) {
+        // default impl does nothing
+        let _ = additional;
+    }
+    fn push(&mut self, item: T);
+}
+
+#[inline]
+fn deser_collection<C: ExtendReserve<T> + Default, T: DeBin>(o: &mut usize, d: &[u8]) -> Result<C, DeBinErr> {
+    let mut c = C::default();
+    deser_collection_inner(o, d, &mut c)?;
+    Ok(c)
+}
+
+#[inline]
+fn deser_collection_inner<T: DeBin>(o: &mut usize, d: &[u8], c: &mut dyn ExtendReserve<T>) -> Result<(), DeBinErr> {
+    let len: usize = DeBin::de_bin(o, d)?;
+    c.reserve(len);
+    for _ in 0..len {
+        c.push(DeBin::de_bin(o, d)?);
+    }
+    Ok(())
+}
+
+// Vec //
+
+impl<T> ExtendReserve<T> for Vec<T> {
+    #[inline]
+    fn reserve(&mut self, additional: usize) {
+        self.reserve_exact(additional);
+    }
+    
+    #[inline]
+    fn push(&mut self, item: T) {
+        self.push(item);
+    }
+    
 }
 
 impl<T> SerBin for Vec<T>
@@ -277,19 +317,27 @@ where
     T: SerBin,
 {
     fn ser_bin(&self, s: &mut Vec<u8>) {
-        let mut iter = self.iter();
-        ser_iter(&mut iter, s);
+        ser_collection(&mut self.iter(), s);
     }
 }
 
 impl<T: DeBin> DeBin for Vec<T> {
     fn de_bin(o: &mut usize, d: &[u8]) -> Result<Self, DeBinErr> {
-        let len: usize = DeBin::de_bin(o, d)?;
-        let mut out = Self::with_capacity(len);
-        for _ in 0..len {
-            out.push(DeBin::de_bin(o, d)?)
-        }
-        Ok(out)
+        deser_collection(o, d)
+    }
+}
+
+// VecDeque //
+
+impl<T> ExtendReserve<T> for VecDeque<T> {
+    #[inline]
+    fn reserve(&mut self, additional: usize) {
+        self.reserve_exact(additional);
+    }
+    
+    #[inline]
+    fn push(&mut self, item: T) {
+        self.push_back(item);
     }
 }
 
@@ -299,7 +347,7 @@ where
 {
     fn ser_bin(&self, s: &mut Vec<u8>) {
         let mut iter = self.iter();
-        ser_iter(&mut iter, s);
+        ser_collection(&mut iter, s);
     }
 }
 
@@ -308,13 +356,19 @@ where
     T: DeBin,
 {
     fn de_bin(o: &mut usize, d: &[u8]) -> Result<Self, DeBinErr> {
-        let len: usize = DeBin::de_bin(o, d)?;
-        let mut out = Self::with_capacity(len);
-        for _ in 0..len {
-            out.push_back(DeBin::de_bin(o, d)?)
-        }
-        Ok(out)
+        deser_collection(o, d)
     }
+}
+
+
+// LinkedList //
+
+impl<T> ExtendReserve<T> for LinkedList<T> {    
+    #[inline]
+    fn push(&mut self, item: T) {
+        self.push_back(item);
+    }
+    
 }
 
 impl<T> SerBin for LinkedList<T>
@@ -323,7 +377,7 @@ where
 {
     fn ser_bin(&self, s: &mut Vec<u8>) {
         let mut iter = self.iter();
-        ser_iter(&mut iter, s);
+        ser_collection(&mut iter, s);
     }
 }
 
@@ -332,13 +386,25 @@ where
     T: DeBin,
 {
     fn de_bin(o: &mut usize, d: &[u8]) -> Result<LinkedList<T>, DeBinErr> {
-        let len: usize = DeBin::de_bin(o, d)?;
-        let mut out = LinkedList::new();
-        for _ in 0..len {
-            out.push_back(DeBin::de_bin(o, d)?)
-        }
-        Ok(out)
+        deser_collection(o, d)
     }
+}
+
+
+// HashSet //
+
+#[cfg(feature = "std")]
+impl<T: std::hash::Hash + std::cmp::Eq> ExtendReserve<T> for std::collections::HashSet<T> { 
+    #[inline]
+    fn push(&mut self, item: T) {
+        self.insert(item);
+    }
+    
+    #[inline]
+    fn reserve(&mut self, additional: usize) {
+        self.reserve(additional);
+    }
+    
 }
 
 #[cfg(feature = "std")]
@@ -347,8 +413,7 @@ where
     T: SerBin,
 {
     fn ser_bin(&self, s: &mut Vec<u8>) {
-        let mut iter = self.iter();
-        ser_iter(&mut iter, s);
+        ser_collection(&mut self.iter(), s);
     }
 }
 
@@ -358,13 +423,19 @@ where
     T: DeBin + core::hash::Hash + Eq,
 {
     fn de_bin(o: &mut usize, d: &[u8]) -> Result<Self, DeBinErr> {
-        let len: usize = DeBin::de_bin(o, d)?;
-        let mut out = std::collections::HashSet::with_capacity(len);
-        for _ in 0..len {
-            out.insert(DeBin::de_bin(o, d)?);
-        }
-        Ok(out)
+        deser_collection(o, d)
     }
+}
+
+
+// BTreeSet //
+
+impl<T: Ord> ExtendReserve<T> for BTreeSet<T> {   
+    #[inline]
+    fn push(&mut self, item: T) {
+        self.insert(item);
+    }
+    
 }
 
 impl<T> SerBin for BTreeSet<T>
@@ -373,7 +444,7 @@ where
 {
     fn ser_bin(&self, s: &mut Vec<u8>) {
         let mut iter = self.iter();
-        ser_iter(&mut iter, s);
+        ser_collection(&mut iter, s);
     }
 }
 
@@ -382,12 +453,7 @@ where
     T: DeBin + Ord,
 {
     fn de_bin(o: &mut usize, d: &[u8]) -> Result<BTreeSet<T>, DeBinErr> {
-        let len: usize = DeBin::de_bin(o, d)?;
-        let mut out = BTreeSet::new();
-        for _ in 0..len {
-            out.insert(DeBin::de_bin(o, d)?);
-        }
-        Ok(out)
+        deser_collection(o, d)
     }
 }
 
