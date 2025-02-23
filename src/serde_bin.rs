@@ -3,7 +3,7 @@ use core::error::Error;
 
 use alloc::borrow::ToOwned;
 use alloc::boxed::Box;
-use alloc::collections::{BTreeMap, BTreeSet, LinkedList};
+use alloc::collections::{BTreeMap, BTreeSet, LinkedList, VecDeque};
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -216,17 +216,7 @@ impl SerBin for bool {
 
 impl DeBin for bool {
     fn de_bin(o: &mut usize, d: &[u8]) -> Result<bool, DeBinErr> {
-        if *o + 1 > d.len() {
-            return Err(DeBinErr {
-                o: *o,
-                msg: DeBinErrReason::Length {
-                    expected_length: 1,
-                    actual_length: d.len(),
-                },
-            });
-        }
-        let m = d[*o];
-        *o += 1;
+        let m: u8 = DeBin::de_bin(o, d)?;
         if m == 0 {
             Ok(false)
         } else {
@@ -272,28 +262,56 @@ impl DeBin for String {
     }
 }
 
+#[inline]
+/// This function relies on ExactSizeIterator trait to get the length of the iterator,
+/// do not use for types which may report an incorrect size hint
+fn ser_iter<T: SerBin>(iter: &mut dyn ExactSizeIterator<Item = &T>, s: &mut Vec<u8>) {
+    iter.size_hint().0.ser_bin(s);
+    for item in iter {
+        item.ser_bin(s);
+    }
+}
+
 impl<T> SerBin for Vec<T>
 where
     T: SerBin,
 {
     fn ser_bin(&self, s: &mut Vec<u8>) {
-        let len = self.len();
-        len.ser_bin(s);
-        for item in self {
-            item.ser_bin(s);
-        }
+        let mut iter = self.iter();
+        ser_iter(&mut iter, s);
     }
 }
 
-impl<T> DeBin for Vec<T>
+impl<T: DeBin> DeBin for Vec<T> {
+    fn de_bin(o: &mut usize, d: &[u8]) -> Result<Self, DeBinErr> {
+        let len: usize = DeBin::de_bin(o, d)?;
+        let mut out = Self::with_capacity(len);
+        for _ in 0..len {
+            out.push(DeBin::de_bin(o, d)?)
+        }
+        Ok(out)
+    }
+}
+
+impl<T> SerBin for VecDeque<T>
+where
+    T: SerBin,
+{
+    fn ser_bin(&self, s: &mut Vec<u8>) {
+        let mut iter = self.iter();
+        ser_iter(&mut iter, s);
+    }
+}
+
+impl<T> DeBin for VecDeque<T>
 where
     T: DeBin,
 {
-    fn de_bin(o: &mut usize, d: &[u8]) -> Result<Vec<T>, DeBinErr> {
+    fn de_bin(o: &mut usize, d: &[u8]) -> Result<Self, DeBinErr> {
         let len: usize = DeBin::de_bin(o, d)?;
-        let mut out = Vec::with_capacity(len);
+        let mut out = Self::with_capacity(len);
         for _ in 0..len {
-            out.push(DeBin::de_bin(o, d)?)
+            out.push_back(DeBin::de_bin(o, d)?)
         }
         Ok(out)
     }
@@ -304,11 +322,8 @@ where
     T: SerBin,
 {
     fn ser_bin(&self, s: &mut Vec<u8>) {
-        let len = self.len();
-        len.ser_bin(s);
-        for item in self.iter() {
-            item.ser_bin(s);
-        }
+        let mut iter = self.iter();
+        ser_iter(&mut iter, s);
     }
 }
 
@@ -332,11 +347,8 @@ where
     T: SerBin,
 {
     fn ser_bin(&self, s: &mut Vec<u8>) {
-        let len = self.len();
-        len.ser_bin(s);
-        for item in self.iter() {
-            item.ser_bin(s);
-        }
+        let mut iter = self.iter();
+        ser_iter(&mut iter, s);
     }
 }
 
@@ -360,11 +372,8 @@ where
     T: SerBin,
 {
     fn ser_bin(&self, s: &mut Vec<u8>) {
-        let len = self.len();
-        len.ser_bin(s);
-        for item in self.iter() {
-            item.ser_bin(s);
-        }
+        let mut iter = self.iter();
+        ser_iter(&mut iter, s);
     }
 }
 
@@ -401,7 +410,7 @@ where
     T: DeBin,
 {
     fn de_bin(o: &mut usize, d: &[u8]) -> Result<Option<T>, DeBinErr> {
-        if *o + 1 > d.len() {
+        let Some(m) = d.get(*o).cloned() else {
             return Err(DeBinErr {
                 o: *o,
                 msg: DeBinErrReason::Length {
@@ -409,8 +418,7 @@ where
                     actual_length: d.len(),
                 },
             });
-        }
-        let m = d[*o];
+        };
         *o += 1;
         if m == 1 {
             Ok(Some(DeBin::de_bin(o, d)?))
